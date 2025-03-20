@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  video_processor:
+    build: .
+    container_name: video_processor
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./videos:/app/videos  # Persist processed videos
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility,graphics
+      - NVIDIA_REQUIRE_CUDA=cuda>=12.8
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64
+      - LIBVA_DRIVER_NAME=nvidia
+      - XDG_SESSION_TYPE=x11
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    runtime: nvidia
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  redis:
+    image: "redis:latest"
+    container_name: video_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  celery_worker:
+    build: .
+    container_name: video_worker
+    volumes:
+      - ./videos:/app/videos  # Share video directory with main service
+    depends_on:
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility,graphics
+      - NVIDIA_REQUIRE_CUDA=cuda>=12.8
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64
+      - LIBVA_DRIVER_NAME=nvidia
+      - XDG_SESSION_TYPE=x11
+    runtime: nvidia
+    command: celery -A api.tasks worker --loglevel=info
+    restart: unless-stopped
