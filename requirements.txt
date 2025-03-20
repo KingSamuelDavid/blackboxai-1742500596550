@@ -1,0 +1,26 @@
+# Core dependencies
+Flask==2.0.1
+celery==5.2.3
+redis==4.1.0
+gunicorn==20.1.0
+
+# Image and video processing
+opencv-python==4.7.0.72
+Pillow==9.3.0
+ffmpeg-python==0.2.0
+numpy>=1.21.0
+
+# AI Models and GPU support
+torch>=2.0.0
+torchvision>=0.15.0
+basicsr>=1.4.2
+facexlib>=0.2.5
+gfpgan>=1.3.8
+realesrgan>=0.3.0
+rife @ git+https://github.com/megvii-research/RIFE.git
+openai-whisper==20231117
+
+# Utilities
+python-multipart==0.0.6
+requests>=2.26.0
+tqdm>=4.64.0
