@@ -1,20 +1,61 @@
 from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import logging
 import os
 from tasks import image_to_video
 import traceback
+from config import *
+import time
+from werkzeug.utils import secure_filename
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, 'api.log')),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=[f"{RATE_LIMIT_REQUESTS} per {RATE_LIMIT_WINDOW} seconds"]
+)
+
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def check_file_size(file_path):
+    """Check if file size is within limits"""
+    size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    return size_mb <= MAX_FILE_SIZE_MB
+
+@app.route('/health', methods=['GET'])
+@limiter.exempt
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": time.time(),
+        "version": "1.0.0"
+    })
 
 def validate_request(data):
-    """Validate the incoming request data."""
+    """
+    Validate the incoming request data.
+    
+    Args:
+        data (dict): Request data containing input paths and processing options
+    
+    Returns:
+        list: List of validation errors, empty if validation passes
+    """
     errors = []
     
     # Check if input images are provided
@@ -48,6 +89,7 @@ def validate_request(data):
     return errors
 
 @app.route('/image2video', methods=['POST'])
+@limiter.limit(f"{RATE_LIMIT_REQUESTS} per {RATE_LIMIT_WINDOW} seconds")
 def convert_images_to_video():
     """
     Convert a sequence of images to video with optional AI enhancements.
@@ -65,14 +107,18 @@ def convert_images_to_video():
     }
     """
     try:
-        # Log request received
-        logger.info("Received image2video conversion request")
+        # Log request received with request ID
+        request_id = str(int(time.time() * 1000))
+        logger.info(f"Received image2video conversion request - ID: {request_id}")
         
         # Validate request content type
         if not request.is_json:
-            logger.error("Request content-type is not application/json")
+            logger.error(f"Request {request_id}: Invalid content type")
             return jsonify({
-                "error": "Content-Type must be application/json"
+                "status": "error",
+                "code": "INVALID_CONTENT_TYPE",
+                "message": "Content-Type must be application/json",
+                "request_id": request_id
             }), 400
 
         # Get JSON data
@@ -84,8 +130,11 @@ def convert_images_to_video():
         if validation_errors:
             logger.error(f"Validation errors: {validation_errors}")
             return jsonify({
-                "error": "Validation failed",
-                "details": validation_errors
+                "status": "error",
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed",
+                "details": validation_errors,
+                "request_id": request_id
             }), 400
 
         # Process the conversion
@@ -100,15 +149,21 @@ def convert_images_to_video():
         except Exception as e:
             logger.error(f"Processing error: {str(e)}\n{traceback.format_exc()}")
             return jsonify({
-                "error": "Processing failed",
-                "details": str(e)
+                "status": "error",
+                "code": "PROCESSING_ERROR",
+                "message": "Processing failed",
+                "details": str(e),
+                "request_id": request_id
             }), 500
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}\n{traceback.format_exc()}")
         return jsonify({
-            "error": "Internal server error",
-            "details": str(e)
+            "status": "error",
+            "code": "INTERNAL_ERROR",
+            "message": "Internal server error",
+            "details": str(e),
+            "request_id": request_id
         }), 500
 
 if __name__ == '__main__':
